@@ -10,6 +10,7 @@ ideas that fail to improve performance too; do not rewrite earlier measurements.
 | EP-002 | evio_processor | Internal parallel branch compression | Validated; opt-in gains on both inputs | [Record](EP-002-root-compression.md), [benchmark](../records/EP-002-root-compression-2026-10-09.md) |
 | EP-003 | evio_processor | Worker-local TTree merger experiment | Parked; correctness mismatch unresolved | `wip/ep-003-worker-local-root` at `8d4979c` |
 | EP-004 | evio_processor | Sequential RNTuple with matched compression | Validated; opt-in gains on both inputs | [Record](EP-004-sequential-rntuple.md), [benchmark](../records/EP-004-sequential-rntuple-2026-10-09.md) |
+| EP-005 | evio_processor | Single event-oriented RNTuple reference | Sequential layout reference | [Record](EP-005-event-rntuple-layout.md), [benchmark](../records/EP-005-event-rntuple-layout-2026-10-09.md) |
 
 For every subsequent optimization:
 

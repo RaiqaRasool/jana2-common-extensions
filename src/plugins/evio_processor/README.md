@@ -111,7 +111,7 @@ All parameters are set on the JANA2 command line with `-P<name>=<value>`.
 | Parameter | Default | `is_shared` | Description |
 |---|---|---|---|
 | `ROOT_OUT_FILENAME` | `evio_processor.root` | yes | Path/name of the ROOT output file |
-| `ROOT_FORMAT` | `ttree` | yes | `ttree` or `rntuple`; RNTuple uses a different reading API |
+| `ROOT_FORMAT` | `ttree` | yes | `ttree`, `rntuple`, or `rntuple_event`; different reader/layout contracts |
 | `ROOT_IMT_THREADS` | `0` | yes | ROOT implicit-MT thread hint for parallel compression; 0 leaves ROOT unchanged |
 
 ---
@@ -170,3 +170,21 @@ and typed `GetView<T>("field")` calls in ROOT 6.34. Existing TTree casts and bra
 reading code require adaptation. Default `ROOT_FORMAT=ttree` retains the existing
 output contract. See EP-004 in `benchmarks/optimizations/` for validation and the
 matched-compression benchmark before choosing a backend.
+
+## Event-oriented RNTuple reference
+
+`-PROOT_FORMAT=rntuple_event` writes a single RNTuple named `events` plus the
+unchanged `h_integral` histogram. Every physics event has one row. Fields use
+`waveform_`, `pulse_`, `caen1190_`, and `helicity_` prefixes. Waveform/CAEN and
+pulse vectors retain their original ordering and values; pulse vectors contain
+only nonzero-integral hits. `pulse_nhits=0` represents events omitted from the
+older pulse dataset. Pedestal scalars retain the last pulse hit's values.
+Helicity fields are vectors, with one value per helicity hit in that event.
+
+`source_file`, `run_number`, `block_number`, and `event_number` identify an event;
+helicity vector position identifies a hit within it. Source identity is the
+input resource path, so callers supplying the same resource multiple times
+should distinguish those inputs externally. This mode initially fills
+sequentially and provides the layout reference for parallel filling. All
+writers finalize before the same ROOT file is closed. See EP-005 in
+`benchmarks/optimizations/` for cross-layout validation and timing.

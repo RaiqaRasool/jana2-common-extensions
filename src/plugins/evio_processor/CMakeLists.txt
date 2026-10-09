@@ -4,6 +4,7 @@
 
 add_jana_plugin(evio_processor
     SOURCES
+        EventRootNtuple.cc
         InitPlugin.cc
         JEventProcessor_EVIO.cc
 )

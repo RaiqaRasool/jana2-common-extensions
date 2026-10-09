@@ -6,6 +6,7 @@
 #include <TTree.h>
 #include <TH1.h>
 #include "SequentialRootNtuple.h"
+#include "EventRootNtuple.h"
 
 #include <string>
 #include <vector>
@@ -77,9 +78,10 @@ private:
         "ROOT implicit-MT thread count for parallel branch compression (0 leaves ROOT unchanged)", true};
 
     Parameter<std::string> m_root_format {
-        this, "ROOT_FORMAT", "ttree", "Output storage: ttree or rntuple (different reader API)", true};
+        this, "ROOT_FORMAT", "ttree", "Output storage: ttree, rntuple, or rntuple_event", true};
     SequentialRootNtuple m_waveform_ntuple, m_pulse_ntuple, m_caen1190_ntuple, m_helicity_ntuple;
     bool m_use_rntuple = false;
+    std::unique_ptr<EventRootNtuple> m_event_ntuple;
 
     // ROOT Tree variables 
     //Waveform Tree Variables

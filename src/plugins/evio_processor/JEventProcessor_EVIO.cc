@@ -37,8 +37,8 @@ void JEventProcessor_EVIO::Init() {
             << ROOT::GetThreadPoolSize() << " threads" << LOG_END;
     }
 
-    if (m_root_format() != "ttree" && m_root_format() != "rntuple")
-        throw JException("ROOT_FORMAT must be ttree or rntuple");
+    if (m_root_format() != "ttree" && m_root_format() != "rntuple" && m_root_format() != "rntuple_event")
+        throw JException("ROOT_FORMAT must be ttree, rntuple, or rntuple_event");
     m_use_rntuple = m_root_format() == "rntuple";
 
     // Open the ROOT output file
@@ -47,7 +47,9 @@ void JEventProcessor_EVIO::Init() {
         throw JException("Failed to open ROOT output file: " + m_root_output_filename());  
     }
 
-    if (m_use_rntuple) {
+    if (m_root_format() == "rntuple_event") {
+        m_event_ntuple = std::make_unique<EventRootNtuple>(*m_root_output_file);
+    } else if (m_use_rntuple) {
         m_waveform_ntuple.Field("slot", &ev_slot);
         m_waveform_ntuple.Field("chan", &ev_chan);
         m_waveform_ntuple.Field("waveform", &ev_waveform);
@@ -176,6 +178,12 @@ void JEventProcessor_EVIO::Init() {
  * @param event Reference to the JANA2 event to process
  */
 void JEventProcessor_EVIO::ProcessSequential(const JEvent &event) {
+    if (m_event_ntuple) {
+        m_event_ntuple->Fill(event);
+        for (const auto* hit : m_pulse_hits_in()) m_pulse_integral_hist->Fill(hit->integral_sum);
+        return;
+    }
+
     
     // Clear previous event data
     ev_slot.clear();
@@ -313,7 +321,9 @@ void JEventProcessor_EVIO::Finish() {
 
     // Write ROOT objects and close ROOT file
     if (m_root_output_file) {
-        if (m_use_rntuple) {
+        if (m_event_ntuple) {
+            m_event_ntuple.reset();
+        } else if (m_use_rntuple) {
             // Commit all RNTuple footers before closing their shared ROOT file.
             m_waveform_ntuple.Finish();
             m_pulse_ntuple.Finish();
