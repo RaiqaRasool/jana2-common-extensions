@@ -5,38 +5,15 @@
 #include <TFile.h>
 #include <TTree.h>
 #include <TH1.h>
+#include "SequentialRootNtuple.h"
 
-#include <fstream>
 #include <string>
 #include <vector>
 
 #include <JANA/JEventProcessor.h>
 #include "CAEN1190Hit.h"
 #include "EventHits_FADC.h"
-#include "FADCScalerHit.h"
-#include "TIScalerHit.h"
 #include "HelicityDecoderData.h"
-#include "MPDHit.h"
-#include "VFTDCHit.h"
-#include "FADC250HallBPulseIntegralHit.h"
-#include "FADC250HallBPulseTimeHit.h"
-#include "FADC250HallBPulsePeakHit.h"
-
-/**
- * @struct WaveformTreeRow
- * @brief Data structure representing one row in the waveform ROOT TTree
- * 
- * Contains the waveform hit information to be stored in ROOT Tree:
- * - slot: FADC250 slot number
- * - chan: Channel number within the slot
- * - waveform: Vector of ADC sample values
- */
-struct WaveformTreeRow {
-    uint32_t slot;
-    uint32_t chan;
-    uint32_t rocid;
-    std::vector<uint32_t> waveform;
-};
 
 struct HelDec_t {
     uint32_t helicity_seed;
@@ -79,14 +56,7 @@ private:
     Input<CAEN1190Hit>                 m_caen1190_hits_in {this};
     Input<FADC250WaveformHit>          m_waveform_hits_in {this}; 
     Input<FADC250PulseHit>             m_pulse_hits_in {this};
-    Input<FADCScalerHit>               m_fadc_scaler_hits_in {this};
-    Input<TIScalerHit>                 m_ti_scaler_hits_in {this};
     Input<HelicityDecoderData>         m_heldec_data_in {this};
-    Input<MPDHit>                      m_mpd_hits_in {this};
-    Input<VFTDCHit>                    m_vftdc_hits_in {this};
-    Input<FADC250HallBPulseIntegralHit> m_hallb_pulse_integral_hits_in {this};
-    Input<FADC250HallBPulseTimeHit>    m_hallb_pulse_time_hits_in {this};
-    Input<FADC250HallBPulsePeakHit>    m_hallb_pulse_peak_hits_in {this};
 
     /**
      * @brief ROOT output filename parameter
@@ -102,13 +72,14 @@ private:
      */
     Parameter<std::string> m_root_output_filename {this, "ROOT_OUT_FILENAME", "evio_processor.root", "Output file name for ROOT data", true};
 
-    /**
-     * @brief Text output filename parameter
-     *
-     * Text file where per-event summaries of waveform, pulse, and scaler
-     * hits are written.
-     */
-    Parameter<std::string> m_txt_output_filename {this, "TXT_OUT_FILENAME", "evio_processor_hits.txt", "Output text file name for event hit summaries", true};
+    Parameter<unsigned int> m_root_imt_threads {
+        this, "ROOT_IMT_THREADS", 0,
+        "ROOT implicit-MT thread count for parallel branch compression (0 leaves ROOT unchanged)", true};
+
+    Parameter<std::string> m_root_format {
+        this, "ROOT_FORMAT", "ttree", "Output storage: ttree or rntuple (different reader API)", true};
+    SequentialRootNtuple m_waveform_ntuple, m_pulse_ntuple, m_caen1190_ntuple, m_helicity_ntuple;
+    bool m_use_rntuple = false;
 
     // ROOT Tree variables 
     //Waveform Tree Variables
@@ -151,15 +122,12 @@ private:
 
     // ROOT output objects
     TFile *m_root_output_file;                ///< ROOT file for histogram and tree storage
-    WaveformTreeRow m_waveform_tree_row;      ///< Data structure holding the current row for TTree filling
     TTree *m_waveform_tree;                   ///< ROOT tree for waveform data
     TTree *m_tree;                            ///< ROOT tree for physics event
     TH1I *m_pulse_integral_hist;              ///< Histogram of pulse integral sums
     TTree *m_pulse_tree;                      ///< ROOT tree for pulse hit
     TTree *m_caen1190_tree;                     ///< Root tree for CAEN1190 data
     
-    // Text output for human-readable dump of hits per event
-    std::ofstream m_txt_output_file;
 
 public:
 

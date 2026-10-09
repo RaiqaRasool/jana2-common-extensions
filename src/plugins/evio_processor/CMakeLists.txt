@@ -15,5 +15,6 @@ target_link_libraries(evio_processor
         ROOT::RIO
         ROOT::Tree
         ROOT::Hist
+        ROOT::ROOTNTuple
         evio_common_modules_data_types
 )

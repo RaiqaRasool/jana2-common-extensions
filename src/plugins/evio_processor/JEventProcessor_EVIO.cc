@@ -1,5 +1,6 @@
 #include "JEventProcessor_EVIO.h"
 #include <JANA/JLogger.h>
+#include <TROOT.h>
 
 /**
  * @brief Constructor for JEventProcessor_EVIO
@@ -13,16 +14,9 @@ JEventProcessor_EVIO::JEventProcessor_EVIO() {
 
     // All of these are optional because not all events will have these hits
     m_caen1190_hits_in.SetOptional(true);
-    m_fadc_scaler_hits_in.SetOptional(true);
     m_pulse_hits_in.SetOptional(true);
     m_waveform_hits_in.SetOptional(true);
-    m_ti_scaler_hits_in.SetOptional(true);
     m_heldec_data_in.SetOptional(true);
-    m_mpd_hits_in.SetOptional(true);
-    m_vftdc_hits_in.SetOptional(true);
-    m_hallb_pulse_integral_hits_in.SetOptional(true);
-    m_hallb_pulse_time_hits_in.SetOptional(true);
-    m_hallb_pulse_peak_hits_in.SetOptional(true);
 }
 
 /**
@@ -34,15 +28,76 @@ JEventProcessor_EVIO::JEventProcessor_EVIO() {
 void JEventProcessor_EVIO::Init() {
     LOG << "JEventProcessor_EVIO::Init" << LOG_END;
     
+    if (m_root_imt_threads() > 0) {
+        ROOT::EnableImplicitMT(m_root_imt_threads());
+        if (!ROOT::IsImplicitMTEnabled()) {
+            throw JException("ROOT_IMT_THREADS requires a ROOT build with implicit multithreading support");
+        }
+        LOG << "ROOT implicit multithreading enabled for branch compression: "
+            << ROOT::GetThreadPoolSize() << " threads" << LOG_END;
+    }
+
+    if (m_root_format() != "ttree" && m_root_format() != "rntuple")
+        throw JException("ROOT_FORMAT must be ttree or rntuple");
+    m_use_rntuple = m_root_format() == "rntuple";
+
     // Open the ROOT output file
     m_root_output_file = new TFile(m_root_output_filename().c_str(), "RECREATE");
     if (m_root_output_file == nullptr || m_root_output_file->IsZombie()) {
         throw JException("Failed to open ROOT output file: " + m_root_output_filename());  
     }
 
-    // Initialize the waveform tree row data structure
-    m_waveform_tree_row = WaveformTreeRow();
-
+    if (m_use_rntuple) {
+        m_waveform_ntuple.Field("slot", &ev_slot);
+        m_waveform_ntuple.Field("chan", &ev_chan);
+        m_waveform_ntuple.Field("waveform", &ev_waveform);
+        m_waveform_ntuple.Field("rocid", &ev_rocid);
+        m_waveform_ntuple.Open("waveform_tree", *m_root_output_file);
+        m_pulse_ntuple.Field("integral_sum", &ev_integral_sum);
+        m_pulse_ntuple.Field("pedestal_sum", &pedestal_sum);
+        m_pulse_ntuple.Field("coarse_time", &ev_coarse_time);
+        m_pulse_ntuple.Field("fine_time", &ev_fine_time);
+        m_pulse_ntuple.Field("pulse_peak", &ev_pulse_peak);
+        m_pulse_ntuple.Field("pedestal_quality", &pedestal_quality);
+        m_pulse_ntuple.Field("nhits", &number_hit);
+        m_pulse_ntuple.Field("chan", &ev_pulse_chan);
+        m_pulse_ntuple.Field("slot", &ev_pulse_slot);
+        m_pulse_ntuple.Field("rocid", &ev_pulse_rocid);
+        m_pulse_ntuple.Open("pulse_tree", *m_root_output_file);
+        m_caen1190_ntuple.Field("rocid", &ev_caen_rocid);
+        m_caen1190_ntuple.Field("slot", &ev_caen_slot);
+        m_caen1190_ntuple.Field("chan", &ev_caen_chan);
+        m_caen1190_ntuple.Field("measurement", &ev_caen_measurement);
+        m_caen1190_ntuple.Field("opt", &ev_caen_opt);
+        m_caen1190_ntuple.Field("flags", &ev_caen_flags);
+        m_caen1190_ntuple.Field("trig_time", &ev_caen_trig_time);
+        m_caen1190_ntuple.Field("hdr_chip_id", &ev_caen_hdr_chip_id);
+        m_caen1190_ntuple.Field("hdr_event_id", &ev_caen_hdr_event_id);
+        m_caen1190_ntuple.Field("hdr_bunch_id", &ev_caen_hdr_bunch_id);
+        m_caen1190_ntuple.Field("trl_status", &ev_caen_trl_status);
+        m_caen1190_ntuple.Open("caen1190_tree", *m_root_output_file);
+        m_helicity_ntuple.Field("helicity_seed", &heldec.helicity_seed);
+        m_helicity_ntuple.Field("n_tstable_fall", &heldec.n_tstable_fall);
+        m_helicity_ntuple.Field("n_tstable_rise", &heldec.n_tstable_rise);
+        m_helicity_ntuple.Field("n_pattsync", &heldec.n_pattsync);
+        m_helicity_ntuple.Field("n_pairsync", &heldec.n_pairsync);
+        m_helicity_ntuple.Field("time_tstable_start", &heldec.time_tstable_start);
+        m_helicity_ntuple.Field("time_tstable_end", &heldec.time_tstable_end);
+        m_helicity_ntuple.Field("last_tstable_duration", &heldec.last_tstable_duration);
+        m_helicity_ntuple.Field("last_tsettle_duration", &heldec.last_tsettle_duration);
+        m_helicity_ntuple.Field("trig_tstable", &heldec.trig_tstable);
+        m_helicity_ntuple.Field("trig_pattsync", &heldec.trig_pattsync);
+        m_helicity_ntuple.Field("trig_pairsync", &heldec.trig_pairsync);
+        m_helicity_ntuple.Field("trig_helicity", &heldec.trig_helicity);
+        m_helicity_ntuple.Field("trig_pat0_helicity", &heldec.trig_pat0_helicity);
+        m_helicity_ntuple.Field("trig_polarity", &heldec.trig_polarity);
+        m_helicity_ntuple.Field("trig_pat_count", &heldec.trig_pat_count);
+        m_helicity_ntuple.Field("last32wins_pattsync", &heldec.last32wins_pattsync);
+        m_helicity_ntuple.Field("last32wins_pairsync", &heldec.last32wins_pairsync);
+        m_helicity_ntuple.Field("last32wins_helicity", &heldec.last32wins_helicity);
+        m_helicity_ntuple.Field("last32wins_pattsync_hel", &heldec.last32wins_pattsync_hel);
+        m_helicity_ntuple.Open("m_tree", *m_root_output_file);
+    } else {
     // Create ROOT tree for waveform data
     m_waveform_tree = new TTree("waveform_tree", "FADC250 Waveform Data (slot, channel, waveform)");
     m_waveform_tree->Branch("slot", &ev_slot);
@@ -104,8 +159,7 @@ void JEventProcessor_EVIO::Init() {
         "last32wins_pattsync_hel/i"
     );
 
-    // Optionally: Text output file for human-readable hit summaries
-    m_txt_output_file.open(m_txt_output_filename().c_str());
+    }
 
     // Create histogram for pulse integral distribution
     m_pulse_integral_hist = new TH1I("h_integral", "Pulse Integral Distribution;Integral Sum;Counts", 100, 0, 1);
@@ -167,22 +221,17 @@ void JEventProcessor_EVIO::ProcessSequential(const JEvent &event) {
         ev_caen_trl_status.push_back(caen_hit->glb_trl_status);
 
     }
-    m_caen1190_tree->Fill();
+    if (m_use_rntuple) m_caen1190_ntuple.Fill();
+        else m_caen1190_tree->Fill();
 
     // FADC250 waveform hits
     for (const auto& waveform_hit : m_waveform_hits_in()) {
-        // Fill ROOT tree with waveform data
-        m_waveform_tree_row.slot = waveform_hit->slot;
-        m_waveform_tree_row.chan = waveform_hit->chan;
-        m_waveform_tree_row.rocid = waveform_hit->rocid;
-        m_waveform_tree_row.waveform = waveform_hit->waveform;
-
-	size_t waveform_sample_number = m_waveform_tree_row.waveform.size();
-
-	ev_slot.insert(ev_slot.end(), waveform_sample_number, m_waveform_tree_row.slot);
-	ev_chan.insert(ev_chan.end(), waveform_sample_number, m_waveform_tree_row.chan);
-        ev_rocid.insert(ev_rocid.end(), waveform_sample_number, m_waveform_tree_row.rocid);
-	ev_waveform.insert(ev_waveform.end(),  m_waveform_tree_row.waveform.begin(), m_waveform_tree_row.waveform.end());
+        const auto& waveform = waveform_hit->waveform;
+        const auto sample_count = waveform.size();
+        ev_slot.insert(ev_slot.end(), sample_count, waveform_hit->slot);
+        ev_chan.insert(ev_chan.end(), sample_count, waveform_hit->chan);
+        ev_rocid.insert(ev_rocid.end(), sample_count, waveform_hit->rocid);
+        ev_waveform.insert(ev_waveform.end(), waveform.begin(), waveform.end());
     }
 
     // FADC250 pulse hits
@@ -210,9 +259,11 @@ void JEventProcessor_EVIO::ProcessSequential(const JEvent &event) {
     }
 
     number_hit = nn;
-    m_waveform_tree->Fill();
+    if (m_use_rntuple) m_waveform_ntuple.Fill();
+        else m_waveform_tree->Fill();
     if(nn>0){
-        m_pulse_tree->Fill();
+        if (m_use_rntuple) m_pulse_ntuple.Fill();
+        else m_pulse_tree->Fill();
     }
 
 
@@ -245,227 +296,10 @@ void JEventProcessor_EVIO::ProcessSequential(const JEvent &event) {
         heldec.last32wins_pairsync    = heldec_hit->last32wins_pairsync;
         heldec.last32wins_helicity    = heldec_hit->last32wins_helicity;
         heldec.last32wins_pattsync_hel= heldec_hit->last32wins_pattsync_hel;
-        m_tree->Fill();
+        if (m_use_rntuple) m_helicity_ntuple.Fill();
+        else m_tree->Fill();
     }
 
-    // ------------------------------------------------------------------
-    // Optional text dump of hits for this event (waveforms, pulses, scalers)
-    // ------------------------------------------------------------------
-    if (m_txt_output_file.is_open()) {
-        const auto& caen1190_hits            = m_caen1190_hits_in();
-        const auto& waveform_hits            = m_waveform_hits_in();
-        const auto& pulse_hits               = m_pulse_hits_in();
-        const auto& fadc_scaler_hits         = m_fadc_scaler_hits_in();
-        const auto& ti_scaler_hits           = m_ti_scaler_hits_in();
-        const auto& mpd_hits                 = m_mpd_hits_in();
-        const auto& vftdc_hits               = m_vftdc_hits_in();
-        const auto& hallb_pulse_integral_hits = m_hallb_pulse_integral_hits_in();
-        const auto& hallb_pulse_time_hits    = m_hallb_pulse_time_hits_in();
-        const auto& hallb_pulse_peak_hits    = m_hallb_pulse_peak_hits_in();
-
-        bool have_caen1190_hits          = !caen1190_hits.empty();
-        bool have_waveforms              = !waveform_hits.empty();
-        bool have_pulses                 = !pulse_hits.empty();
-        bool have_fadc_scalers           = !fadc_scaler_hits.empty();
-        bool have_ti_scalers             = !ti_scaler_hits.empty();
-        bool have_mpd_hits               = !mpd_hits.empty();
-        bool have_vftdc_hits             = !vftdc_hits.empty();
-        bool have_hallb_pulse_integrals  = !hallb_pulse_integral_hits.empty();
-        bool have_hallb_pulse_times      = !hallb_pulse_time_hits.empty();
-        bool have_hallb_pulse_peaks      = !hallb_pulse_peak_hits.empty();
-        // Only write anything if we have at least one type of hit
-        if (have_caen1190_hits ||  have_waveforms || have_pulses || have_fadc_scalers || have_ti_scalers || have_mpd_hits || have_vftdc_hits
-            || have_hallb_pulse_integrals || have_hallb_pulse_times || have_hallb_pulse_peaks) {
-            auto event_number = event.GetEventNumber();
-
-            m_txt_output_file << "Event " << event_number << "\n";
-
-            // CAEN1190 summary
-            if (have_caen1190_hits) {
-                m_txt_output_file << "  CAEN1190 hits: " << caen1190_hits.size() << "\n";
-                for (const auto& hit : caen1190_hits) {
-                    m_txt_output_file
-                        << "    CAEN1190 rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " measurement=" << hit->measurement
-                        << " opt=" << hit->opt
-                        << " flags=" << hit->flags
-                        << " trig_time=" << hit->trig_time
-                        << " hdr_chip_id=" << hit->hdr_chip_id
-                        << " hdr_event_id=" << hit->hdr_event_id
-                        << " hdr_bunch_id=" << hit->hdr_bunch_id
-                        << " trl_status=" << hit->glb_trl_status
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No CAEN1190hit in this event\n";
-            }
-
-            // Waveform summary
-            if (have_waveforms) {
-                m_txt_output_file << "  Waveform hits: " << waveform_hits.size() << "\n";
-                for (const auto& hit : waveform_hits) {
-                    m_txt_output_file
-                        << "    WF rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " nsamples=" << hit->waveform.size()
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No FADC250 waveform hits in this event\n";
-            }
-
-            // Pulse summary
-            if (have_pulses) {
-                m_txt_output_file << "  Pulse hits: " << pulse_hits.size() << "\n";
-                for (const auto& hit : pulse_hits) {
-                    m_txt_output_file
-                        << "    PULSE rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " integral_sum=" << hit->integral_sum
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No FADC250 pulse hits in this event\n";
-            }
-
-            // FADC scaler summary
-            if (have_fadc_scalers) {
-                m_txt_output_file << "  FADC scaler hits: " << fadc_scaler_hits.size() << "\n";
-                for (const auto& hit : fadc_scaler_hits) {
-                    m_txt_output_file
-                        << "    SCALER rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " ncounts=" << hit->ncounts
-                        << " counts=";
-                    for (uint32_t i = 0; i < hit->ncounts && i < 16u; ++i) {
-                        m_txt_output_file << hit->counts[i];
-                        if (i + 1 < hit->ncounts && i + 1 < 16u) {
-                            m_txt_output_file << ",";
-                        }
-                    }
-                    m_txt_output_file << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No FADCScalerHit objects in this event\n";
-            }
-
-            // TI scaler summary
-            if (have_ti_scalers) {
-                m_txt_output_file << "  TI scaler hits: " << ti_scaler_hits.size() << "\n";
-                for (const auto& hit : ti_scaler_hits) {
-                    m_txt_output_file
-                        << "    TISCALER rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " nwords=" << hit->nscalerwords
-                        << " live_time=" << hit->live_time
-                        << " busy_time=" << hit->busy_time
-                        << " ts_inputs_before_busy=" << hit->ts_inputs_before_busy
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No TIScalerHit objects in this event\n";
-            }
-
-            // MPD hit summary
-            if (have_mpd_hits) {
-                m_txt_output_file << "  MPD hits: " << mpd_hits.size() << "\n";
-                for (const auto& hit : mpd_hits) {
-                    m_txt_output_file
-                        << "    MPD rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " trigger_num=" << hit->trigger_num
-                        << " trigger_time=" << hit->trigger_time
-                        << " mpd_id=" << (int)hit->mpd_id
-                        << " fiber_id=" << (int)hit->fiber_id
-                        << " apv_channel=" << (int)hit->apv_channel
-                        << " apv_id=" << (int)hit->apv_id
-                        << " apv_samples=[";
-                    for (int i = 0; i < 6; ++i) {
-                        m_txt_output_file << hit->apv_samples[i];
-                        if (i < 5) m_txt_output_file << ",";
-                    }
-                    m_txt_output_file << "]\n";
-                }
-            } else {
-                m_txt_output_file << "  No MPDHit objects in this event\n";
-            }
-
-            // VFTDC hit summary
-            if (have_vftdc_hits) {
-                m_txt_output_file << "  VFTDC hits: " << vftdc_hits.size() << "\n";
-                for (const auto& hit : vftdc_hits) {
-                    m_txt_output_file
-                        << "    VFTDC rocid=" << hit->rocid
-                        << " slot=" << hit->slot
-                        << " board_id=" << hit->board_id
-                        << " timestamp=" << hit->timestamp
-                        << " group_num=" << hit->group_num
-                        << " channel_num=" << hit->channel_num
-                        << " edge_type=" << hit->edge_type
-                        << " coarse_time=" << hit->coarse_time
-                        << " fine_time=" << hit->fine_time
-                        << " two_ns=" << hit->two_ns
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No VFTDCHit objects in this event\n";
-            }
-
-            // HallB pulse integral summary
-            if (have_hallb_pulse_integrals) {
-                m_txt_output_file << "  HallB pulse integral hits: " << hallb_pulse_integral_hits.size() << "\n";
-                for (const auto& hit : hallb_pulse_integral_hits) {
-                    m_txt_output_file
-                        << "    HALLB_INTEGRAL slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " pulse_number=" << hit->pulse_number
-                        << " pulse_integral=" << hit->pulse_integral
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No HallB pulse integral hits in this event\n";
-            }
-
-            // HallB pulse time summary
-            if (have_hallb_pulse_times) {
-                m_txt_output_file << "  HallB pulse time hits: " << hallb_pulse_time_hits.size() << "\n";
-                for (const auto& hit : hallb_pulse_time_hits) {
-                    m_txt_output_file
-                        << "    HALLB_TIME slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " pulse_number=" << hit->pulse_number
-                        << " measurement_quality_factor=" << hit->measurement_quality_factor
-                        << " coarse_pulse_time=" << hit->coarse_pulse_time
-                        << " fine_pulse_time=" << hit->fine_pulse_time
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No HallB pulse time hits in this event\n";
-            }
-
-            // HallB pulse peak summary
-            if (have_hallb_pulse_peaks) {
-                m_txt_output_file << "  HallB pulse peak hits: " << hallb_pulse_peak_hits.size() << "\n";
-                for (const auto& hit : hallb_pulse_peak_hits) {
-                    m_txt_output_file
-                        << "    HALLB_PEAK slot=" << hit->slot
-                        << " chan=" << hit->chan
-                        << " pulse_number=" << hit->pulse_number
-                        << " Vmin=" << hit->Vmin
-                        << " Vpeak=" << hit->Vpeak
-                        << "\n";
-                }
-            } else {
-                m_txt_output_file << "  No HallB pulse peak hits in this event\n";
-            }
-
-            m_txt_output_file << "\n";
-        }
-    }
 }
 
 /**
@@ -479,19 +313,23 @@ void JEventProcessor_EVIO::Finish() {
 
     // Write ROOT objects and close ROOT file
     if (m_root_output_file) {
-        m_waveform_tree->Write();        // Save waveform tree to file
-        m_pulse_integral_hist->Write();  // Save integral histogram to file
-	    m_tree->Write();
-        m_pulse_tree->Write();           // Save pulse tree to file
-        m_caen1190_tree->Write();        // Save caen1190 tree to file
+        if (m_use_rntuple) {
+            // Commit all RNTuple footers before closing their shared ROOT file.
+            m_waveform_ntuple.Finish();
+            m_pulse_ntuple.Finish();
+            m_caen1190_ntuple.Finish();
+            m_helicity_ntuple.Finish();
+        } else {
+            m_waveform_tree->Write();
+            m_tree->Write();
+            m_pulse_tree->Write();
+            m_caen1190_tree->Write();
+        }
+        m_root_output_file->cd();
+        m_pulse_integral_hist->Write();
         m_root_output_file->Close();     // Close ROOT file
         delete m_root_output_file;       // Free memory
         m_root_output_file = nullptr;
     }
 
-    // Close text output file if open
-    if (m_txt_output_file.is_open()) {
-        m_txt_output_file.close();
-    }
 }
-
