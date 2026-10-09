@@ -23,7 +23,7 @@ def main():
     root=Path(__file__).resolve().parent.parent
     home=Path(os.environ['JCE_HOME'])
     optimization='EP-005' if args.stage=='layout' else 'EP-006'
-    cases=[('four-dataset','rntuple',1,False),('event','rntuple_event',1,False)] if args.stage=='layout' else [('sequential','rntuple_event',1,False),('parallel-1','rntuple_event',1,True),('parallel-2','rntuple_event',2,True),('parallel-4','rntuple_event',4,True)]
+    cases=[('four-dataset','rntuple',1,False),('event','rntuple_event',1,False)] if args.stage=='layout' else [('sequential','rntuple_event',1,False),('parallel-1','rntuple_event',1,True),('parallel-2','rntuple_event',2,True),('serial-4','rntuple_event',4,False),('parallel-4','rntuple_event',4,True)]
     out=root/'benchmarks/results'/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-'+optimization)
     out.mkdir(parents=True)
     env=dict(os.environ,JCE_CONFIG_DIR='')

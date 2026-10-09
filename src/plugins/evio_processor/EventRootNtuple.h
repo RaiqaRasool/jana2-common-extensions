@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <ROOT/RNTupleParallelWriter.hxx>
+#include <mutex>
 
 // One row per physics event; vectors keep each detector's original hit order.
 struct EventRootRecord {
@@ -122,13 +124,23 @@ struct EventRootRecord {
     void Load(const JEvent& event);
 };
 
+// ROOT owns cluster synchronization; each JANA worker owns its fill buffers.
 class EventRootNtuple {
+    struct Worker {
+        EventRootRecord record;
+        std::shared_ptr<ROOT::Experimental::RNTupleFillContext> context;
+        std::unique_ptr<ROOT::Experimental::REntry> entry;
+        explicit Worker(ROOT::Experimental::RNTupleParallelWriter& writer);
+        void Fill(const JEvent& event) { record.Load(event); context->Fill(*entry); }
+    };
     EventRootRecord m_record;
     SequentialRootNtuple m_ntuple;
+    std::unique_ptr<ROOT::Experimental::RNTupleParallelWriter> m_parallel;
+    std::mutex m_workers_mutex;
+    std::vector<std::shared_ptr<Worker>> m_workers;
+    std::shared_ptr<Worker> GetWorker();
 public:
-    explicit EventRootNtuple(TFile& file) {
-        m_record.Fields([&](const char* name, auto& value) { m_ntuple.Field(name, &value); });
-        m_ntuple.Open("events", file);
-    }
-    void Fill(const JEvent& event) { m_record.Load(event); m_ntuple.Fill(); }
+    EventRootNtuple(TFile& file, bool parallel);
+    void Fill(const JEvent& event);
+    void Finish();
 };

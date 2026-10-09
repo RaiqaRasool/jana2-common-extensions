@@ -112,6 +112,7 @@ All parameters are set on the JANA2 command line with `-P<name>=<value>`.
 |---|---|---|---|
 | `ROOT_OUT_FILENAME` | `evio_processor.root` | yes | Path/name of the ROOT output file |
 | `ROOT_FORMAT` | `ttree` | yes | `ttree`, `rntuple`, or `rntuple_event`; different reader/layout contracts |
+| `ROOT_RNTUPLE_PARALLEL` | `false` | yes | Worker-local filling; requires `ROOT_FORMAT=rntuple_event`; entries may reorder |
 | `ROOT_IMT_THREADS` | `0` | yes | ROOT implicit-MT thread hint for parallel compression; 0 leaves ROOT unchanged |
 
 ---
@@ -188,3 +189,25 @@ should distinguish those inputs externally. This mode initially fills
 sequentially and provides the layout reference for parallel filling. All
 writers finalize before the same ROOT file is closed. See EP-005 in
 `benchmarks/optimizations/` for cross-layout validation and timing.
+
+## Parallel RNTuple filling
+
+Use `-PROOT_FORMAT=rntuple_event -PROOT_RNTUPLE_PARALLEL=1 -Pnthreads=4` to fill
+from four JANA workers using ROOT's RNTupleParallelWriter. Each worker owns its
+buffers and fill context. All contexts target the same `events` dataset in one
+ROOT file. Event identities and detector payloads match the sequential event
+mode, but entries may appear in a different order. Read/join by event identity.
+The histogram still fills sequentially and is written after contexts and their
+writer are finalized. Other output modes reject the parallel flag.
+
+Compression threads are separate from JANA workers; add `-PROOT_IMT_THREADS=4`
+to use the benchmark's ROOT pool hint. More workers can increase memory use and
+need not improve throughput. EP-006 in `benchmarks/optimizations/` records the
+measured 1/2/4-worker results and the same-worker-count serial control. The
+parallel flag defaults to false.
+
+Version detail: ROOT 6.34 does not expose the newer explicit IMT-on option for
+RNTupleParallelWriter. A configured global compression pool does not imply
+that this writer uses the same compression threading as RNTupleWriter. The
+EP-006 measurements compare these native strategies with matched ZLIB level,
+including this version-specific difference.

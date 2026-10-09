@@ -3,6 +3,8 @@
 #include "CAEN1190Hit.h"
 #include "EventHits_FADC.h"
 #include "HelicityDecoderData.h"
+#include <type_traits>
+#include <unordered_map>
 
 void EventRootRecord::Load(const JEvent& event) {
     const auto& parent = event.HasParent(JEventLevel::Block) ? event.GetParent(JEventLevel::Block) : event;
@@ -147,4 +149,48 @@ void EventRootRecord::Load(const JEvent& event) {
 
     }
 
+}
+
+EventRootNtuple::Worker::Worker(ROOT::Experimental::RNTupleParallelWriter& writer)
+    : context(writer.CreateFillContext()), entry(context->GetModel().CreateBareEntry()) {
+    record.Fields([&](const char* name, auto& value) { entry->BindRawPtr(name, &value); });
+}
+
+EventRootNtuple::EventRootNtuple(TFile& file, bool parallel) {
+    if (parallel) {
+        auto model = ROOT::Experimental::RNTupleModel::CreateBare();
+        m_record.Fields([&](const char* name, auto& value) {
+            model->MakeField<std::decay_t<decltype(value)>>(name);
+        });
+        ROOT::Experimental::RNTupleWriteOptions options;
+        options.SetCompression(file.GetCompressionSettings());
+        m_parallel = ROOT::Experimental::RNTupleParallelWriter::Append(std::move(model), "events", file, options);
+    } else {
+        m_record.Fields([&](const char* name, auto& value) { m_ntuple.Field(name, &value); });
+        m_ntuple.Open("events", file);
+    }
+}
+
+std::shared_ptr<EventRootNtuple::Worker> EventRootNtuple::GetWorker() {
+    // Weak caches expire at Finish and cannot retain ROOT contexts or stale owners.
+    thread_local std::unordered_map<const EventRootNtuple*, std::weak_ptr<Worker>> cache;
+    if (auto worker = cache[this].lock()) return worker;
+    std::lock_guard<std::mutex> lock(m_workers_mutex);
+    auto worker = std::make_shared<Worker>(*m_parallel);
+    m_workers.push_back(worker);
+    cache[this] = worker;
+    return worker;
+}
+
+void EventRootNtuple::Fill(const JEvent& event) {
+    if (m_parallel) GetWorker()->Fill(event);
+    else { m_record.Load(event); m_ntuple.Fill(); }
+}
+
+void EventRootNtuple::Finish() {
+    // Finish runs after the JANA workers stop. Contexts must precede the writer.
+    for (auto& worker : m_workers) worker->context->FlushCluster();
+    m_workers.clear();
+    m_parallel.reset();
+    m_ntuple.Finish();
 }

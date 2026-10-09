@@ -41,6 +41,10 @@ void JEventProcessor_EVIO::Init() {
         throw JException("ROOT_FORMAT must be ttree, rntuple, or rntuple_event");
     m_use_rntuple = m_root_format() == "rntuple";
 
+    if (m_root_rntuple_parallel() && m_root_format() != "rntuple_event")
+        throw JException("ROOT_RNTUPLE_PARALLEL requires ROOT_FORMAT=rntuple_event");
+    if (m_root_rntuple_parallel()) ROOT::EnableThreadSafety();
+
     // Open the ROOT output file
     m_root_output_file = new TFile(m_root_output_filename().c_str(), "RECREATE");
     if (m_root_output_file == nullptr || m_root_output_file->IsZombie()) {
@@ -48,7 +52,7 @@ void JEventProcessor_EVIO::Init() {
     }
 
     if (m_root_format() == "rntuple_event") {
-        m_event_ntuple = std::make_unique<EventRootNtuple>(*m_root_output_file);
+        m_event_ntuple = std::make_unique<EventRootNtuple>(*m_root_output_file, m_root_rntuple_parallel());
     } else if (m_use_rntuple) {
         m_waveform_ntuple.Field("slot", &ev_slot);
         m_waveform_ntuple.Field("chan", &ev_chan);
@@ -165,6 +169,7 @@ void JEventProcessor_EVIO::Init() {
 
     // Create histogram for pulse integral distribution
     m_pulse_integral_hist = new TH1I("h_integral", "Pulse Integral Distribution;Integral Sum;Counts", 100, 0, 1);
+    if (m_root_rntuple_parallel()) m_pulse_integral_hist->SetDirectory(nullptr);
     m_pulse_integral_hist->SetCanExtend(TH1::kAllAxes);  // Allow ROOT to automatically extend bins
 }
 
@@ -177,9 +182,13 @@ void JEventProcessor_EVIO::Init() {
  * 
  * @param event Reference to the JANA2 event to process
  */
+void JEventProcessor_EVIO::ProcessParallel(const JEvent& event) {
+    if (m_root_rntuple_parallel()) m_event_ntuple->Fill(event);
+}
+
 void JEventProcessor_EVIO::ProcessSequential(const JEvent &event) {
     if (m_event_ntuple) {
-        m_event_ntuple->Fill(event);
+        if (!m_root_rntuple_parallel()) m_event_ntuple->Fill(event);
         for (const auto* hit : m_pulse_hits_in()) m_pulse_integral_hist->Fill(hit->integral_sum);
         return;
     }
@@ -322,6 +331,7 @@ void JEventProcessor_EVIO::Finish() {
     // Write ROOT objects and close ROOT file
     if (m_root_output_file) {
         if (m_event_ntuple) {
+            m_event_ntuple->Finish();
             m_event_ntuple.reset();
         } else if (m_use_rntuple) {
             // Commit all RNTuple footers before closing their shared ROOT file.
@@ -337,6 +347,10 @@ void JEventProcessor_EVIO::Finish() {
         }
         m_root_output_file->cd();
         m_pulse_integral_hist->Write();
+        if (m_root_rntuple_parallel()) {
+            delete m_pulse_integral_hist;  // Detached while the ROOT file was in use by contexts.
+            m_pulse_integral_hist = nullptr;
+        }
         m_root_output_file->Close();     // Close ROOT file
         delete m_root_output_file;       // Free memory
         m_root_output_file = nullptr;

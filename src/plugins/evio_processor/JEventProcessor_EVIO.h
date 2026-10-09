@@ -80,6 +80,9 @@ private:
     Parameter<std::string> m_root_format {
         this, "ROOT_FORMAT", "ttree", "Output storage: ttree, rntuple, or rntuple_event", true};
     SequentialRootNtuple m_waveform_ntuple, m_pulse_ntuple, m_caen1190_ntuple, m_helicity_ntuple;
+    Parameter<bool> m_root_rntuple_parallel {
+        this, "ROOT_RNTUPLE_PARALLEL", false,
+        "Worker-local RNTuple fill contexts; requires ROOT_FORMAT=rntuple_event; entries may reorder", true};
     bool m_use_rntuple = false;
     std::unique_ptr<EventRootNtuple> m_event_ntuple;
 
@@ -137,6 +140,7 @@ public:
     virtual ~JEventProcessor_EVIO() = default;
 
     void Init() override;
+    void ProcessParallel(const JEvent& event) override;
     void ProcessSequential(const JEvent& event) override;
     void Finish() override;
 
